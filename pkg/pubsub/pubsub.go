@@ -6,9 +6,10 @@ import (
 )
 
 var (
-	ErrClosed       = errors.New("pubsub: closed")
-	ErrNoTopic      = errors.New("pubsub: no such topic")
-	ErrUnsubscribed = errors.New("pubsub: not subscribed to the topic")
+	ErrClosed             = errors.New("pubsub: closed")
+	ErrNoTopic            = errors.New("pubsub: no such topic")
+	ErrUnsubscribed       = errors.New("pubsub: not subscribed to the topic")
+	ErrTopicAlreadyExists = errors.New("pubsub: topic already exists")
 )
 
 type PubSub interface {
@@ -23,6 +24,13 @@ type PubSub interface {
 
 	// Close closes the PubSub and unsubscribes all topics.
 	Close() error
+
+	// CreateTopic creates a new topic.
+	CreateTopic(topic string) error
+}
+
+type Config struct {
+	Topics []string
 }
 
 type pubsub struct {
@@ -36,12 +44,24 @@ type pubsub struct {
 	closed bool
 }
 
-func NewPubSub() PubSub {
-	return &pubsub{
+func NewPubSub(config Config) (PubSub, error) {
+	ps := &pubsub{
 		mu:          sync.RWMutex{},
 		subscribers: make(map[string][]chan interface{}),
 		closed:      false,
 	}
+
+	for _, topic := range config.Topics {
+		if err := ps.CreateTopic(topic); err != nil {
+			return nil, err
+		}
+	}
+
+	return ps, nil
+}
+
+func WithTopics(topics ...string) Config {
+	return Config{Topics: topics}
 }
 
 func (ps *pubsub) Publish(topic string, message interface{}) error {
@@ -118,5 +138,23 @@ func (ps *pubsub) Close() error {
 		}
 	}
 
+	return nil
+}
+
+func (ps *pubsub) CreateTopic(topic string) error {
+	ps.mu.Lock()
+	defer ps.mu.Unlock()
+
+	if ps.closed {
+		return ErrClosed
+	}
+
+	// Check if topic already exists
+	if _, ok := ps.subscribers[topic]; ok {
+		return ErrTopicAlreadyExists
+	}
+
+	// Create new topic
+	ps.subscribers[topic] = make([]chan interface{}, 0)
 	return nil
 }
